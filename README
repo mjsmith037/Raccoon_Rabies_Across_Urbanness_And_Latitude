@@ -1,0 +1,54 @@
+This repository contains code to replicate results and figures in 
+
+## Latitude, seasonality, and urbanness interact to predict raccoon rabies case reports
+### Meggan E Craft, Matthew Michalska-Smith, Amy J Davis, Amy T Gilbert, Richard Chipman, Jordona Kirby, Kathleen Nelson, Xiaoyue Ma, Ryan Wallace, Grace Miller, & Kim M Pepin
+
+# Repository Structure
+## code
+This directory contains scripts necessary to replicate the results and figures in the aforementioned manuscript
+## data
+This directory contains ___
+## figures
+This directory contains output figures corresponding to figures presented in the aforementioned manuscript
+
+# Analysis pipeline
+## loading data
+
+A hypothetical dataset is provided to demonstrate structure and code functionality. The proposed models require the following data inputs:
+
+- county fips identifiers (used as a random effect)
+- month of sampling
+- latitude (centroid of sampling county)
+- density (population density of sampling county)
+- habitat quality (the fraction of land area in the county with raccoon suitable habitat)
+- the number of positive tests in that county-month
+- the number of tests conducted in that county-month
+
+## fitting models
+
+`run_models.R`
+
+### base_formula:
+
+```
+~ bs(month, df={df_month}, degree={degree_month}) +
+  bs(latitude, df={df_latitude}, degree={degree_latitude}) +
+  bs(density, df={df_density}, degree={degree_density}) +
+  bs(density, df={df_density}, degree={degree_density}) : bs(latitude, df={df_latitude}, degree={degree_latitude}) +
+  bs(month, df={df_month}, degree={degree_month}) : bs(latitude, df={df_latitude}, degree={degree_latitude}) +
+  habitat + temporal_lag + spatial_lag"))
+```
+
+### response variables
+
+- presence: the existence of at least one positive test in that county-month
+- positivity: the proportion of all tests that were positive in that county-month
+- persistence: a binary measure of whether a certain number n of the past m months have had at least one positive test per month for a given county
+
+## plotting model output
+
+`plot_figures_and_tables.R`
+
+N.b. map figures are not replicated here, as the hypothetical data is scrambled in such a way as to make it no longer spatially explicit
+
+N.b. the example figures provided here use the hypothetical data and therefore should not be interpreted as meaningful biological relationships
