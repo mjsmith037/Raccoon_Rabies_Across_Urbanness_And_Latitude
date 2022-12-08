@@ -3,6 +3,8 @@ This repository contains code to replicate results and figures in
 ## Latitude, seasonality, and urbanness interact to predict raccoon rabies case reports
 ### Meggan E Craft, Matthew Michalska-Smith, Amy J Davis, Amy T Gilbert, Richard Chipman, Jordona Kirby, Kathleen Nelson, Xiaoyue Ma, Ryan Wallace, Grace Miller, & Kim M Pepin
 
+N.b. the example models and figures provided in this repository use the hypothetical data and therefore should not be interpreted as meaningful biological relationships
+
 # Repository Structure
 ## code
 This directory contains scripts necessary to replicate the results and figures in the aforementioned manuscript
@@ -51,4 +53,3 @@ A hypothetical dataset is provided to demonstrate structure and code functionali
 
 N.b. map figures are not replicated here, as the hypothetical data is scrambled in such a way as to make it no longer spatially explicit
 
-N.b. the example figures provided here use the hypothetical data and therefore should not be interpreted as meaningful biological relationships
