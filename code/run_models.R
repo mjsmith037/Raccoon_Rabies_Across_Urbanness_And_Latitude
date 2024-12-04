@@ -55,8 +55,8 @@ assign(str_glue("positivity_{model_base}"),
                     # edge cases, avoiding an error when fitting
                     multiply_by(n() - 1) %>% add(0.5) %>% divide_by(n()))
        ))
-# save(list=c(str_glue("positivity_{model_base}"), "base_formula"),
-#      file=str_glue("../results/positivity_{model_base}.RData"))
+save(list=c(str_glue("positivity_{model_base}"), "base_formula"),
+     file=str_glue("../results/positivity_{model_base}.RData"))
 
 #### Rabies Presence Model ####
 assign(str_glue("presence_{model_base}"),
@@ -66,8 +66,8 @@ assign(str_glue("presence_{model_base}"),
          family    = binomial(),
          data      = monthly_data %>% mutate(presence = (positive > 0) %>% as.factor())
        ))
-# save(list=c(str_glue("presence_{model_base}"), "base_formula"),
-#      file=str_glue("../results/presence_{model_base}.RData"))
+save(list=c(str_glue("presence_{model_base}"), "base_formula"),
+     file=str_glue("../results/presence_{model_base}.RData"))
 
 #### Rabies Persistence Model ####
 # This model requires restructured data. First define the lag and cutoff parameters
@@ -107,16 +107,21 @@ if (file.exists(str_glue("../data/persistence_{num_months_with_pos}.{lag_duratio
     write_csv(str_glue("../data/persistence_{num_months_with_pos}.{lag_duration_months}_data.csv"))
 }
 
+persistence_base_formula <- formula(str_glue("persistence ~ bs(month, df={df_month}, degree={degree_month}) +
+  bs(latitude, df={df_latitude}, degree={degree_latitude}) +
+  bs(density, df={df_density}, degree={degree_density}) +
+  bs(density, df={df_density}, degree={degree_density}) : bs(latitude, df={df_latitude}, degree={degree_latitude}) +
+  bs(month, df={df_month}, degree={degree_month}) : bs(latitude, df={df_latitude}, degree={degree_latitude}) +
+  habitat + spatial_lag + temporal_lag + log(total_tested_over_lag + 1)"))
+
 assign(str_glue("persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}"),
        mixed_model(
-         fixed          = base_formula,
+         fixed          = persistence_base_formula,
          random         = ~ 1 | fips,
          family         = binomial(),
          max_coef_value = 1000,
          iter_EM        = 0,
          data           = persistence_data
        ))
-# save(list=c(str_glue("persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}"), "base_formula"),
-#      file=str_glue("../results/persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}.RData"))
-
-
+save(list=c(str_glue("persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}"), "base_formula"),
+     file=str_glue("../results/persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}.RData"))
