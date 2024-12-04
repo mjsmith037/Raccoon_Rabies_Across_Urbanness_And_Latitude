@@ -107,6 +107,7 @@ if (file.exists(str_glue("../data/persistence_{num_months_with_pos}.{lag_duratio
     write_csv(str_glue("../data/persistence_{num_months_with_pos}.{lag_duration_months}_data.csv"))
 }
 
+# base formula is slightly different for the persistence model
 persistence_base_formula <- formula(str_glue("persistence ~ bs(month, df={df_month}, degree={degree_month}) +
   bs(latitude, df={df_latitude}, degree={degree_latitude}) +
   bs(density, df={df_density}, degree={degree_density}) +
@@ -114,6 +115,7 @@ persistence_base_formula <- formula(str_glue("persistence ~ bs(month, df={df_mon
   bs(month, df={df_month}, degree={degree_month}) : bs(latitude, df={df_latitude}, degree={degree_latitude}) +
   habitat + spatial_lag + temporal_lag + log(total_tested_over_lag + 1)"))
 
+# otherwise similar model consruction
 assign(str_glue("persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}"),
        mixed_model(
          fixed          = persistence_base_formula,

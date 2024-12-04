@@ -10,8 +10,12 @@ library(tidyverse)    # for data wrangling
 
 #### settings and ancillary functions ####
 theme_set(theme_bw())
-base_tests <- 2^1
+base_tests <- 2^0
+num_samples <- 100
+resolution <- 100
 monthly_data <- read_csv("../data/hypothetical_data.csv")
+persistence_data <- read_csv("../data/persistence_5.11_data.csv")
+my_colours <- c("#00A676", "#934D77", "#485696", "#FC7A1E")
 
 get_sig <- function(p) {
   case_when(p < 0.001 ~ "***",
@@ -20,44 +24,77 @@ get_sig <- function(p) {
             TRUE ~ "")
 }
 
-rug_data <- monthly_data %>%
-  select(!c(positive, total_tested)) %>%
-  distinct()
-
 #### best fitting models ####
 positivity_model_name <- "density_1_1_month_6_1_latitude_5_1"
-load(str_glue("../results/{positivity_model_name}.RData"))
+load(str_glue("../results/positivity_{positivity_model_name}.RData"))
 positivity_model_name <- str_c("positivity_", positivity_model_name)
 positivity_model <- get(positivity_model_name)
 
-detection_model_name <- "density_1_3_month_7_1_latitude_7_1"
-load(str_glue("../results/{detection_model_name}.RData"))
-detection_model_name <- str_c("detection_", detection_model_name)
-detection_model <- get(detection_model_name)
+presence_model_name <- "density_1_3_month_7_1_latitude_7_1"
+load(str_glue("../results/presence_{presence_model_name}.RData"))
+presence_model_name <- str_c("presence_", presence_model_name)
+presence_model <- get(presence_model_name)
 
 n <- 5; m <- 11
 persistence_model_name <- "density_1_1_month_1_3_latitude_1_2_5_11"
-load(str_glue("../results/{persistence_model_name}.RData"))
-persistence_model_name <- str_glue("endemic_{n}.{m}_{str_remove(persistence_model_name, str_glue('_{n}_{m}$'))}")
+load(str_glue("../results/persistence_{persistence_model_name}.RData"))
+persistence_model_name <- str_glue("persistence_{n}.{m}_{str_remove(persistence_model_name, str_glue('_{n}_{m}$'))}")
 persistence_model <- get(persistence_model_name)
 
 #### predictions ####
-predictions <- monthly_data %>%
-  mutate(latitude = scale(latitude), density = scale(density)) %>%
-  {crossing(month        = month.name %>% factor(levels=month.name, ordered=TRUE) %>% as.integer(),
-            density      = seq(min(.$density), max(.$density), length.out=10),
-            latitude     = seq(min(.$latitude), max(.$latitude), length.out=10),
-            spatial_lag  = seq(min(.$spatial_lag), max(.$spatial_lag), length.out=10),
-            temporal_lag = seq(min(.$temporal_lag), max(.$temporal_lag), length.out=10),
-            habitat      = seq(min(.$habitat), max(.$habitat), length.out=10),
-            total_tested = base_tests)} %>%
+predictions_month <- tibble(
+  density      = sample(monthly_data$density, num_samples, replace=TRUE),
+  spatial_lag  = sample(monthly_data$spatial_lag, num_samples, replace=TRUE),
+  temporal_lag = sample(monthly_data$temporal_lag, num_samples, replace=TRUE),
+  habitat      = sample(monthly_data$habitat, num_samples, replace=TRUE),
+  total_tested = sample(monthly_data$total_tested[monthly_data$total_tested != 0], num_samples, replace=TRUE),
+  total_tested_over_lag = sample(persistence_data$total_tested_over_lag[persistence_data$total_tested_over_lag != 0],
+                                 num_samples, replace=TRUE)) %>%
+  crossing(month  = seq(min(monthly_data$month), max(monthly_data$month), length.out=resolution),
+           latitude   = quantile(monthly_data$latitude, probs=c(0.11, 0.55, 0.83))) %>%
   group_split(month, .keep=TRUE) %>%
-  lapply(. %>% mutate(pred = predict(positivity_model, newdata=.),
-                      pred_zi = predict(detection_model, newdata=.))) %>%
+  lapply(function(dat) {
+    full_join(effectPlotData(positivity_model, newdata=dat),
+              effectPlotData(presence_model, newdata=dat),
+              by=c("month", "density", "latitude",
+                   "spatial_lag", "temporal_lag",
+                   "habitat", "total_tested", "total_tested_over_lag"),
+              suffix=c("", "_zi")) %>%
+      full_join(effectPlotData(persistence_model, newdata=dat),
+                by=c("month", "density", "latitude",
+                     "spatial_lag", "temporal_lag",
+                     "habitat", "total_tested", "total_tested_over_lag"),
+                suffix=c("", "_end"))}) %>%
   bind_rows() %>%
   # un-transform variables after getting predictions
-  mutate(density = density %>% multiply_by(sd(monthly_data$density)) %>% add(mean(monthly_data$density)),
-         latitude = latitude %>% multiply_by(sd(monthly_data$latitude)) %>% add(mean(monthly_data$latitude)))
+  mutate(across(c(pred, low, upp, pred_zi, low_zi, upp_zi, pred_end, low_end, upp_end), plogis))
+
+predictions_density <- tibble(
+  month        = sample(monthly_data$month, num_samples, replace=TRUE),
+  spatial_lag  = sample(monthly_data$spatial_lag, num_samples, replace=TRUE),
+  temporal_lag = sample(monthly_data$temporal_lag, num_samples, replace=TRUE),
+  habitat      = sample(monthly_data$habitat, num_samples, replace=TRUE),
+  total_tested = sample(monthly_data$total_tested[monthly_data$total_tested != 0], num_samples, replace=TRUE),
+  total_tested_over_lag = sample(persistence_data$total_tested_over_lag[persistence_data$total_tested_over_lag != 0],
+                                 num_samples, replace=TRUE)) %>%
+  crossing(density    = seq(min(monthly_data$density), max(monthly_data$density), length.out=resolution),
+           latitude   = quantile(monthly_data$latitude, probs=c(0.11, 0.55, 0.83))) %>%
+  group_split(density, .keep=TRUE) %>%
+  lapply(function(dat) {
+    full_join(effectPlotData(positivity_model, newdata=dat),
+              effectPlotData(presence_model, newdata=dat),
+              by=c("month", "density", "latitude",
+                   "spatial_lag", "temporal_lag",
+                   "habitat", "total_tested", "total_tested_over_lag"),
+              suffix=c("", "_zi")) %>%
+      full_join(effectPlotData(persistence_model, newdata=dat),
+                by=c("month", "density", "latitude",
+                     "spatial_lag", "temporal_lag",
+                     "habitat", "total_tested", "total_tested_over_lag"),
+                suffix=c("", "_end"))}) %>%
+  bind_rows() %>%
+  # un-transform variables after getting predictions
+  mutate(across(c(pred, low, upp, pred_zi, low_zi, upp_zi, pred_end, low_end, upp_end), plogis))
 
 #### SUMMARY TABLE FOR BEST PREVALENCE MODEL  # # # # # # # # # # # # # # # ####
 summary(positivity_model)$coef_table %>%
@@ -68,23 +105,23 @@ summary(positivity_model)$coef_table %>%
          Term = str_remove_all(Term, "\\(month\\)"),
          Term = str_remove_all(Term, ", df = 1, degree = 1\\)"),
          Term = str_remove_all(Term, "bs\\((?=\\w+($|:))"),
-         Term = str_replace_all(Term, c("total_tested"="Total Number of Tests",
+         Term = str_replace_all(Term, c("total_tested"="Total Number of Samples Submitted",
                                         "temporal_lag"="Temporal Lag",
                                         "spatial_lag"="Spatial Effect",
                                         "latitude"="Latitude",
                                         "density"="Population Density",
-                                        "habitat"="Racoon Favorable Habitat",
+                                        "habitat"="Raccoon Favorable Habitat",
                                         "month"="Month"))) %>%
   rename(`\\emph{p} value` = `p-value`,
          `Standard Error` = Std.Err,
          ` ` = sig) %>%
-  kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc") %>%
-  add_header_above(c(" "=1, "Percent Positivity"=4)) %>%
+  kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc", linesep="") %>%
+  add_header_above(c(" "=1, "Prevalence"=4)) %>%
   collapse_rows(1, latex_hline="major") %T>%
   save_kable(file="../figures/best_prevalence_model.png")
 
-#### SUMMARY TABLE FOR BEST DETECTION MODEL # # # # # # # # # # # # # # # # ####
-summary(detection_model)$coef_table %>%
+#### SUMMARY TABLE FOR BEST PRESENCE MODEL # # # # # # # # # # # # # # # # ####
+summary(presence_model)$coef_table %>%
   as_tibble(rownames="Term") %>%
   select(-`z-value`) %>%
   mutate(sig = get_sig(`p-value`),
@@ -92,20 +129,20 @@ summary(detection_model)$coef_table %>%
          Term = str_remove_all(Term, "\\(month\\)"),
          Term = str_remove_all(Term, ", df = 1, degree = 1\\)"),
          Term = str_remove_all(Term, "bs\\((?=\\w+($|:))"),
-         Term = str_replace_all(Term, c("total_tested"="Total Number of Tests",
+         Term = str_replace_all(Term, c("total_tested"="Total Number of Samples Submitted",
                                         "temporal_lag"="Temporal Lag",
                                         "spatial_lag"="Spatial Effect",
                                         "latitude"="Latitude",
                                         "density"="Population Density",
-                                        "habitat"="Racoon Favorable Habitat",
+                                        "habitat"="Raccoon Favorable Habitat",
                                         "month"="Month"))) %>%
   rename(`\\emph{p} value` = `p-value`,
          `Standard Error` = Std.Err,
          ` ` = sig) %>%
-  kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc") %>%
-  add_header_above(c(" "=1, "Detection"=4)) %>%
+  kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc", linesep="") %>%
+  add_header_above(c(" "=1, "Presence"=4)) %>%
   collapse_rows(1, latex_hline="major") %T>%
-  save_kable(file="../figures/best_detection_model.png")
+  save_kable(file="../figures/best_presence_model.png")
 
 #### SUMMARY TABLE FOR BEST PERSISTENCE MODEL # # # # # # # # # # # # # # # ####
 summary(persistence_model)$coef_table %>%
@@ -121,21 +158,21 @@ summary(persistence_model)$coef_table %>%
                                         "spatial_lag"="Spatial Effect",
                                         "latitude"="Latitude",
                                         "density"="Population Density",
-                                        "habitat"="Racoon Favorable Habitat",
+                                        "habitat"="Raccoon Favorable Habitat",
                                         "month"="Month"))) %>%
   rename(`\\emph{p} value` = `p-value`,
-         `Standard Error` = `Std.Err`,
+         `Standard Error` = Std.Err,
          ` ` = sig) %>%
-  kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc") %>%
+  kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc", linesep="") %>%
   add_header_above(c(" "=1, "Persistence"=4)) %>%
   collapse_rows(1, latex_hline="major") %T>%
   save_kable(file="../figures/best_persistence_model.png")
 
 #### TESTS AND POSITIVITY BY MONTH  # # # # # # # # # # # # # # # # # # # # ####
 monthly_data %>%
-  mutate(region = case_when(latitude <= quantile(latitude, 0.25) ~
+  mutate(region = case_when(latitude <= quantile(unique(latitude), 0.25) ~
                               "South (lower quartile by latitude)",
-                            latitude >= quantile(latitude, 0.75) ~
+                            latitude >= quantile(unique(latitude), 0.75) ~
                               "North (upper quartile by latitude)",
                             TRUE ~ "Middle") %>%
            factor(levels=c("South (lower quartile by latitude)",
@@ -144,19 +181,19 @@ monthly_data %>%
   na.omit() %>%
   mutate(positivity = positive / total_tested) %>%
   {ggplot(.) +
-      aes(x=as.numeric(month), y=total_tested) +
+      aes(x=month, y=total_tested) +
       geom_quasirandom(aes(group=month), varwidth=TRUE, size=0.25) +
-      geom_smooth(colour="#FC7A1E", method="gam", formula=y~s(x, bs="cs")) +
+      geom_smooth(colour=my_colours[4], method="gam", formula=y~s(x, bs="cs")) +
       scale_y_log10(breaks=c(0:5, 10*1:5, 100)) +
-      ylab("Tests conducted") +
+      ylab("Samples submitted") +
       facet_wrap(~region, nrow=1) +
       theme(axis.title.x=element_blank(),
             axis.text.x=element_blank(),
             axis.ticks.x=element_blank()) +
       ggplot(.) +
-      aes(x=as.numeric(month), y=positivity) +
+      aes(x=month, y=positivity) +
       geom_quasirandom(aes(group=month), varwidth=TRUE, size=0.25) +
-      geom_smooth(colour="#FC7A1E", method="gam", formula=y~s(x, bs="cs")) +
+      geom_smooth(colour=my_colours[4], method="gam", formula=y~s(x, bs="cs")) +
       scale_x_continuous(name=NULL, breaks=1:12, labels=month.name) +
       scale_y_continuous(name="Percent Positivity", limits=0:1, breaks=0:4/4,
                          labels=c("0%", "25%", "50%", "75%", "100%")) +
@@ -168,150 +205,181 @@ monthly_data %>%
 ggsave(filename="../figures/tests_and_positivity.png", width=8, height=6)
 
 #### MONTH LATITUDE INTERACTION PLOT  # # # # # # # # # # # # # # # # # # # ####
-predictions %>%
-  filter(near(latitude, 28, tol=0.5) | near(latitude, 33, tol=0.5) | near(latitude, 37, tol=0.5) | near(latitude, 43, tol=0.5)) %>%
-  mutate(latitude = latitude %>% round() %>% str_c("°") %>% factor(ordered=TRUE)) %>%
-  {ggplot(.) +
-      aes(x=month, colour=latitude) +
-      geom_smooth(aes(y=pred_zi), size=1, se=FALSE) +
-      scale_y_continuous(name="Detection", limits=0:1) +
-      scale_x_continuous(name=NULL, breaks=1:12, labels=month.name) +
-      scale_colour_manual(name="Latitude:", values=c("#FC7A1E", "#00A676", "#934D77", "#485696")) +
-      theme(axis.text.x=element_text(angle=30, hjust=1, vjust=1),
-            axis.ticks.y=element_blank(),
-            legend.position=c(0.725, 0.12),
-            legend.background=element_rect(fill=alpha("#FFFFFF", 0.8)),
-            legend.direction="horizontal")}
-ggsave(filename="../figures/detection_by_month_and_latitude.png", width=7, height=4)
+{predictions_month %>%
+    group_by(month, latitude) %>%
+    summarise(low_zi = quantile(pred_zi, 0.1), high_zi=quantile(pred_zi, 0.9), pred_zi = mean(pred_zi), .groups="drop") %>%
+    mutate(latitude = latitude %>% round() %>% str_c("°") %>%
+             factor(ordered=TRUE, labels=c("Southern", "Mid-latitude", "Northern"))) %>%
+    {ggplot(.) +
+        aes(x=month, group=str_c(latitude)) +
+        geom_ribbon(aes(ymin=low_zi, ymax=high_zi, fill=latitude), alpha=0.2) +
+        geom_smooth(aes(y=pred_zi, colour=latitude), linewidth=1, se=FALSE, span=0.2) +
+        coord_cartesian(ylim=c(0,1)) +
+        scale_y_continuous(name="Presence", breaks=0:4/4) +
+        scale_x_continuous(name=NULL, breaks=1:12, labels=month.name) +
+        scale_colour_manual(name="Latitude:", values=my_colours,
+                            aesthetics=c("colour", "fill")) +
+        theme(axis.text.x=element_blank(),
+              axis.ticks.x=element_blank())}} +
+  
+  {predictions_month %>%
+      group_by(month, latitude) %>%
+      summarise(low = quantile(pred, 0.1), high=quantile(pred, 0.9), pred = mean(pred), .groups="drop") %>%
+      mutate(latitude = latitude %>% round() %>% str_c("°") %>%
+               factor(ordered=TRUE, labels=c("Southern", "Mid-latitude", "Northern"))) %>%
+      {ggplot(.) +
+          aes(x=month) +
+          geom_ribbon(aes(ymin=low, ymax=high, fill=latitude), alpha=0.2) +
+          geom_smooth(aes(y=pred, colour=latitude), linewidth=1, se=FALSE, span=0.2) +
+          coord_cartesian(ylim=c(0,1)) +
+          scale_y_continuous(name="Prevalence", breaks=0:4/4) +#,
+                             # labels=c("0%", "25%", "50%", "75%", "100%")) +
+          scale_x_continuous(name=NULL, breaks=1:12, labels=month.name) +
+          scale_colour_manual(name="Latitude:", values=my_colours,
+                              aesthetics=c("colour", "fill")) +
+          theme(axis.text.x=element_text(angle=30, hjust=1, vjust=1))}} +
+  
+  {predictions_month %>%
+      group_by(month, latitude) %>%
+      summarise(low_end = quantile(pred_end, 0.1), high_end = quantile(pred_end, 0.9),
+                pred_end = mean(pred_end), .groups="drop") %>%
+      mutate(latitude = latitude %>% round() %>% str_c("°") %>%
+               factor(ordered=TRUE, labels=c("Southern", "Mid-latitude", "Northern"))) %>%
+      {ggplot(.) +
+          aes(x=month) +
+          geom_ribbon(aes(ymin=low_end, ymax=high_end, fill=latitude), alpha=0.2) +
+          geom_smooth(aes(y=pred_end, colour=latitude), linewidth=1, se=FALSE, span=0.2) +
+          coord_cartesian(ylim=c(0,1)) +
+          scale_y_continuous(name="Persistence", breaks=0:4/4) +
+          scale_x_continuous(name=NULL, breaks=1:12, labels=month.name) +
+          scale_colour_manual(name="Latitude:", values=my_colours,
+                              aesthetics=c("colour", "fill")) +
+          theme(axis.text.x=element_text(angle=30, hjust=1, vjust=1))}} +
+  patchwork::plot_layout(ncol=1, guides="collect") &
+  theme(legend.position="bottom")
 
-predictions %>%
-  filter(near(latitude, 28, tol=0.5) | near(latitude, 33, tol=0.5) | near(latitude, 37, tol=0.5) | near(latitude, 43, tol=0.5)) %>%
-  mutate(latitude = latitude %>% round() %>% str_c("°") %>% factor(ordered=TRUE)) %>%
-  {ggplot(.) +
-      aes(x=month, colour=latitude) +
-      geom_smooth(aes(y=pred), size=1, se=FALSE) +
-      scale_y_continuous(name="Percent Positivity", limits=0:1, breaks=0:4/4,
-                         labels=c("0%", "25%", "50%", "75%", "100%")) +
-      scale_x_continuous(name=NULL, breaks=1:12, labels=month.name) +
-      scale_colour_manual(name="Latitude:", values=c("#FC7A1E", "#00A676", "#934D77", "#485696")) +
-      theme(axis.text.x=element_text(angle=30, hjust=1, vjust=1),
-            axis.ticks.y=element_blank(),
-            legend.position=c(0.725, 0.12),
-            # legend.title=element_blank(),
-            legend.background=element_rect(fill=alpha("#FFFFFF", 0.8)),
-            legend.direction="horizontal")}
-ggsave(filename="../figures/prevalence_by_month_and_latitude.png", width=7, height=4)
+ggsave(filename="../figures/month_latitude_interaction.png", width=5, height=6)
 
 #### DENSITY LATITUDE INTERACTION PLOT  # # # # # # # # # # # # # # # # # # ####
-predictions %>%
-  filter(near(density, sort(unique(density))[c(2,4,6,8)])) %>%
-  arrange(desc(density)) %>%
-  mutate(density = factor(density, levels=sort(unique(density)), labels=c("Low", "Intermediate", "High", "Very High"))) %>%
-  {ggplot(.) +
-      aes(x=latitude) +
-      geom_smooth(aes(y=pred_zi, colour=density), size=1, se=FALSE) +
-      geom_rug(size=0.67, alpha=0.2, data=distinct(rug_data, fips, latitude)) +
-      scale_y_continuous(name="Detection", limits=0:1) +
-      scale_x_continuous(expand=expansion()) +
-      scale_colour_manual(values=c("#485696", "#934D77", "#00A676", "#FC7A1E"),
-                          name=expression(paste("Population Density (people / ", km^2, ")"))) +
-      theme(plot.margin=margin(b=0),
-            legend.position=c(0.76, 0.23),
-            legend.direction="vertical",
-            axis.title.x=element_blank())}
-ggsave(filename="../figures/detection_by_latitude_and_density.png", width=7, height=5)
+{predictions_density %>%
+    group_by(density, latitude) %>%
+    summarise(low_zi = quantile(pred_zi, 0.1), high_zi=quantile(pred_zi, 0.9), pred_zi = mean(pred_zi), .groups="drop") %>%
+    mutate(latitude = latitude %>% round() %>% str_c("°") %>%
+             factor(ordered=TRUE, labels=c("Southern", "Mid-latitude", "Northern"))) %>%
+    ggplot() +
+    aes(x=density) +
+    geom_ribbon(aes(ymin=low_zi, ymax=high_zi, fill=latitude), alpha=0.2) +
+    geom_smooth(aes(y=pred_zi, colour=latitude), linewidth=1, se=FALSE) +
+    coord_cartesian(ylim=c(0,1)) +
+    scale_y_continuous(name="Presence", breaks=0:4/4) +
+    scale_colour_manual(name="Latitude:", values=my_colours,
+                        aesthetics=c("colour", "fill")) +
+    theme(axis.title.x=element_blank(),
+          axis.ticks.x=element_blank(),
+          axis.text.x=element_blank())} +
+  
+  {predictions_density %>%
+      group_by(density, latitude) %>%
+      summarise(low = quantile(pred, 0.1), high=quantile(pred, 0.9), pred = mean(pred), .groups="drop") %>%
+      mutate(latitude = latitude %>% round() %>% str_c("°") %>%
+               factor(ordered=TRUE, labels=c("Southern", "Mid-latitude", "Northern"))) %>%
+      ggplot() +
+      aes(x=density) +
+      geom_ribbon(aes(ymin=low, ymax=high, fill=latitude), alpha=0.2) +
+      geom_smooth(aes(y=pred, colour=latitude), linewidth=1, se=FALSE) +
+      coord_cartesian(ylim=c(0,1)) +
+      scale_y_continuous(name="Prevalence", breaks=0:4/4) +#,
+                         # labels=c("0%", "25%", "50%", "75%", "100%")) +
+      scale_colour_manual(name="Latitude:", values=my_colours,
+                          aesthetics=c("colour", "fill")) +
+      theme(axis.title.x=element_blank(),
+            axis.ticks.x=element_blank(),
+            axis.text.x=element_blank())} +
+  
+  {predictions_density %>%
+      group_by(density, latitude) %>%
+      summarise(low_end = quantile(pred_end, 0.1), high_end=quantile(pred_end, 0.9), pred_end = mean(pred_end), .groups="drop") %>%
+      mutate(latitude = latitude %>% round() %>% str_c("°") %>%
+               factor(ordered=TRUE, labels=c("Southern", "Mid-latitude", "Northern"))) %>%
+      ggplot() +
+      aes(x=density) +
+      geom_ribbon(aes(ymin=low_end, ymax=high_end, fill=latitude), alpha=0.2) +
+      geom_smooth(aes(y=pred_end, colour=latitude), linewidth=1, se=FALSE) +
+      geom_rug(linewidth=0.67, alpha=0.2, data=monthly_data %>% distinct(fips, density)) +
+      coord_cartesian(ylim=c(0,1)) +
+      scale_y_continuous(name="Persistence", breaks=0:4/4) +
+      scale_colour_manual(name="Latitude:", values=my_colours,
+                          aesthetics=c("colour", "fill"))} +
+  
+  plot_layout(ncol=1, guides="collect") &
+  scale_x_log10(expand=expansion(), name=expression(paste("Human Population Density (persons/", km^2, ")"))) &
+  theme(legend.position="bottom")
 
-predictions %>%
-  filter(near(density, sort(unique(density))[c(2,4,6,8)])) %>%
-  arrange(desc(density)) %>%
-  mutate(density = factor(density, levels=sort(unique(density)), labels=c("Low", "Intermediate", "High", "Very High"))) %>%
-  {ggplot(.) +
-      aes(x=latitude) +
-      geom_smooth(aes(y=pred, colour=density), size=1, se=FALSE) +
-      geom_rug(size=0.67, alpha=0.2, data=distinct(rug_data, fips, latitude)) +
-      scale_y_continuous(name="Percent Positivity", limits=0:1, breaks=0:4/4,
-                         labels=c("0%", "25%", "50%", "75%", "100%")) +
-      scale_x_continuous(expand=expansion()) +
-      scale_colour_manual(values=c("#485696", "#934D77", "#00A676", "#FC7A1E"),
-                          name=expression(paste("Population Density (people / ", km^2, ")"))) +
-      theme(plot.margin=margin(b=0),
-            legend.position=c(0.76, 0.23),
-            legend.direction="vertical",
-            axis.title.x=element_blank())}
-ggsave(filename="../figures/prevalence_by_latitude_and_density.png", width=7, height=5)
-
-#### TEMPORAL LAG AND SPATIAL EFFECT  # # # # # # # # # # # # # # # # # # # ####
-predictions %>%
-  group_by(spatial_lag, temporal_lag) %>%
-  summarise(across(c(pred, pred_zi), mean)) %>%
-  pivot_longer(c(spatial_lag, temporal_lag), names_to="variable", values_to="value") %>%
-  pivot_longer(c(pred, pred_zi), names_to="prediction", values_to="predicted value") %>%
-  ggplot() +
-  aes(x=value, y=`predicted value`, colour=variable) +
-  geom_smooth(size=1) +
-  facet_wrap(~prediction, ncol=1, scales="free") +
-  scale_colour_manual(values=c("#FC7A1E", "#00A676", "#934D77", "#485696")) +
-  theme(axis.ticks.y=element_blank(),
-        legend.position=c(0.68, 0.63),
-        legend.title=element_blank(),
-        legend.background=element_rect(fill=alpha("#FFFFFF", 0.8)),
-        legend.direction="horizontal")
+ggsave(filename="../figures/latitude_and_density.png", width=5, height=6)
 
 #### HABITAT (NOT SIGNIFICANT)  # # # # # # # # # # # # # # # # # # # # # # ####
-cutoff_detection <- 0.16; cutoff_positivity <- 0.17; cutoff_persistence <- 0.16;
-(monthly_data %>% mutate(detection=as.integer((positive / total_tested) > 0)) %>%
+cutoff_presence <- 0.16; cutoff_positivity <- 0.17; cutoff_persistence <- 0.16;
+(monthly_data %>% mutate(presence=as.integer((positive / total_tested) > 0)) %>%
    {ggplot(.) +
-       aes(x=habitat, y=detection) +
-       geom_quasirandom(groupOnX=FALSE, size=0.25, varwidth=TRUE, width=0.1, alpha=0.05) +
-       # geom_smooth(size=1, colour="#FC7A1E") +
-       geom_smooth(size=1, colour="#FC7A1E", formula=y~x,
-                   method="lm", data=filter(., habitat <= cutoff_detection)) +
-       stat_cor(data=filter(., habitat <= cutoff_detection), colour="#FC7A1E", label.x=0.5, label.y=0.4,
-                aes(label=paste(after_stat(rr.label), after_stat(p.label), sep="~`,`~")),
-                method="spearman") +
-       geom_smooth(size=1, colour="#485696", formula=y~x,
-                   method="lm", data=filter(., habitat > cutoff_detection)) +
-       stat_cor(data=filter(., habitat > cutoff_detection), colour="#485696", label.x=0.5, label.y=0.25,
-                aes(label=paste(after_stat(rr.label), after_stat(p.label), sep="~`,`~")),
-                method="spearman") +
-       scale_y_continuous(name="Detection", breaks=0:1)}) +
+       aes(x=habitat, y=presence) +
+       geom_quasirandom(orientation="y", size=0.25, varwidth=TRUE, width=0.1, alpha=0.05) +
+       geom_smooth(linewidth=1, colour=my_colours[4], formula=y~x,
+                   method = "glm", method.args = list(family = "binomial"),
+                   data=filter(., habitat <= cutoff_presence)) +
+       stat_regline_equation(data=filter(., habitat <= cutoff_presence),
+                             aes(label=paste(..eq.label.., ..adj.rr.label.., sep="~~~~")),
+                             colour=my_colours[4], label.x=0.325, label.y=0.85) +
+       geom_smooth(linewidth=1, colour=my_colours[3], formula=y~x,
+                   method = "glm", method.args = list(family = "binomial"),
+                   data=filter(., habitat > cutoff_presence)) +
+       stat_regline_equation(data=filter(., habitat > cutoff_presence),
+                             aes(label=paste(..eq.label.., ..adj.rr.label.., sep="~~~~")),
+                             colour=my_colours[3], label.x=0.325, label.y=0.675) +
+       scale_y_continuous(name="Presence", breaks=0:1) +
+       theme(axis.text.x=element_blank(),
+             axis.title.x=element_blank(),
+             axis.ticks.x=element_blank())}) +
 
   (monthly_data %>%
      mutate(positivity = positive / total_tested) %>%
      {ggplot(.) +
          aes(x=habitat, y=positivity) +
          geom_point(size=0.25, alpha=0.05) +
-         # geom_smooth(size=1, colour="#FC7A1E") +
-         geom_smooth(size=1, colour="#FC7A1E", formula=y~x,
+         geom_smooth(linewidth=1, colour=my_colours[4], formula=y~x,
                      method="lm", data=filter(., habitat <= cutoff_positivity)) +
-         stat_cor(data=filter(., habitat <= cutoff_positivity), colour="#FC7A1E", label.x=0.5, label.y=0.4,
-                  aes(label=paste(after_stat(rr.label), after_stat(p.label), sep="~`,`~")),
-                  method="spearman") +
-         geom_smooth(size=1, colour="#485696", formula=y~x,
+         stat_regline_equation(data=filter(., habitat <= cutoff_positivity),
+                               aes(label=paste(..eq.label.., ..adj.rr.label.., sep="~~~~")),
+                               colour=my_colours[4], label.x=0.325, label.y=0.85) +
+         geom_smooth(linewidth=1, colour=my_colours[3], formula=y~x,
                      method="lm", data=filter(., habitat > cutoff_positivity)) +
-         stat_cor(data=filter(., habitat > cutoff_positivity), colour="#485696", label.x=0.5, label.y=0.25,
-                  aes(label=paste(after_stat(rr.label), after_stat(p.label), sep="~`,`~")),
-                  method="spearman") +
-         scale_y_continuous(name="Percent Positivity", breaks=0:4/4,
-                            labels=c("0%", "25%", "50%", "75%", "100%"))}) +
+         stat_regline_equation(data=filter(., habitat > cutoff_positivity),
+                               aes(label=paste(..eq.label.., ..adj.rr.label.., sep="~~~~")),
+                               colour=my_colours[3], label.x=0.325, label.y=0.675) +
+         scale_y_continuous(name="Test Positivity", breaks=0:4/4) +#,
+                            # labels=c("0%", "25%", "50%", "75%", "100%")) +
+         theme(axis.text.x=element_blank(),
+               axis.title.x=element_blank(),
+               axis.ticks.x=element_blank())}) +
 
   (persistence_data %>%
      mutate(persistence = as.integer(persistence)) %>%
      {ggplot(.) +
          aes(x=habitat, y=persistence) +
-         geom_quasirandom(groupOnX=FALSE, size=0.25, varwidth=TRUE, width=0.1, alpha=0.05) +
-         # geom_smooth(size=1, colour="#FC7A1E") +
-         geom_smooth(size=1, colour="#FC7A1E", formula=y~x,
-                     method="lm", data=filter(., habitat <= cutoff_persistence)) +
-         stat_cor(data=filter(., habitat <= cutoff_persistence), colour="#FC7A1E", label.x=0.5, label.y=0.4,
-                  aes(label=paste(after_stat(rr.label), after_stat(p.label), sep="~`,`~")),
-                  method="spearman") +
-         geom_smooth(size=1, colour="#485696", formula=y~x,
-                     method="lm", data=filter(., habitat > cutoff_persistence)) +
-         stat_cor(data=filter(., habitat > cutoff_persistence), colour="#485696", label.x=0.5, label.y=0.25,
-                  aes(label=paste(after_stat(rr.label), after_stat(p.label), sep="~`,`~")),
-                  method="spearman") +
+         geom_quasirandom(orientation="y", size=0.25, varwidth=TRUE, width=0.1, alpha=0.05) +
+         geom_smooth(linewidth=1, colour=my_colours[4], formula=y~x,
+                     method = "glm", method.args = list(family = "binomial"),
+                     data=filter(., habitat <= cutoff_persistence)) +
+         stat_regline_equation(data=filter(., habitat <= cutoff_persistence),
+                               aes(label=paste(after_stat(eq.label), after_stat(adj.rr.label), sep="~~~~")),
+                               colour=my_colours[4], label.x=0.325, label.y=0.85) +
+         geom_smooth(linewidth=1, colour=my_colours[3], formula=y~x,
+                     method = "glm", method.args = list(family = "binomial"),
+                     data=filter(., habitat > cutoff_persistence)) +
+         stat_regline_equation(data=filter(., habitat > cutoff_persistence),
+                               aes(label=paste(after_stat(eq.label), after_stat(adj.rr.label), sep="~~~~")),
+                               colour=my_colours[3], label.x=0.325, label.y=0.675) +
          scale_y_continuous(name="Persistence", breaks=0:1)}) +
 
-  plot_layout(ncol=1)
+  plot_layout(ncol=1) &
+  scale_x_continuous(name="Proportion of Land-cover Favorable to Raccoons", limits=0:1)
 ggsave(filename="../figures/habitat_piecewise_regression.png", width=5, height=7)
