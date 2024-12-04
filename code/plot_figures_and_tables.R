@@ -25,18 +25,21 @@ rug_data <- monthly_data %>%
   distinct()
 
 #### best fitting models ####
-positivity_model_name <- "positivity_density_1_2_month_5_2_latitude_1_2"
+positivity_model_name <- "density_1_1_month_6_1_latitude_5_1"
 load(str_glue("../results/{positivity_model_name}.RData"))
+positivity_model_name <- str_c("positivity_", positivity_model_name)
 positivity_model <- get(positivity_model_name)
 
-presence_model_name <- "presence_density_1_2_month_5_2_latitude_1_2"
-load(str_glue("../results/{presence_model_name}.RData"))
-presence_model <- get(presence_model_name)
+detection_model_name <- "density_1_3_month_7_1_latitude_7_1"
+load(str_glue("../results/{detection_model_name}.RData"))
+detection_model_name <- str_c("detection_", detection_model_name)
+detection_model <- get(detection_model_name)
 
-persistence_model_name <- "persistence_6.11_density_1_2_month_1_1_latitude_1_2"
+n <- 5; m <- 11
+persistence_model_name <- "density_1_1_month_1_3_latitude_1_2_5_11"
 load(str_glue("../results/{persistence_model_name}.RData"))
+persistence_model_name <- str_glue("endemic_{n}.{m}_{str_remove(persistence_model_name, str_glue('_{n}_{m}$'))}")
 persistence_model <- get(persistence_model_name)
-persistence_data <- read_csv("../data/persistence_6.11_data.csv")
 
 #### predictions ####
 predictions <- monthly_data %>%
@@ -50,7 +53,7 @@ predictions <- monthly_data %>%
             total_tested = base_tests)} %>%
   group_split(month, .keep=TRUE) %>%
   lapply(. %>% mutate(pred = predict(positivity_model, newdata=.),
-                      pred_zi = predict(presence_model, newdata=.))) %>%
+                      pred_zi = predict(detection_model, newdata=.))) %>%
   bind_rows() %>%
   # un-transform variables after getting predictions
   mutate(density = density %>% multiply_by(sd(monthly_data$density)) %>% add(mean(monthly_data$density)),
@@ -77,12 +80,11 @@ summary(positivity_model)$coef_table %>%
          ` ` = sig) %>%
   kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc") %>%
   add_header_above(c(" "=1, "Percent Positivity"=4)) %>%
-  kable_styling(latex_options="scale_down") %>%
   collapse_rows(1, latex_hline="major") %T>%
   save_kable(file="../figures/best_prevalence_model.png")
 
-#### SUMMARY TABLE FOR BEST PRESENCE MODEL # # # # # # # # # # # # # # # # ####
-summary(presence_model)$coef_table %>%
+#### SUMMARY TABLE FOR BEST DETECTION MODEL # # # # # # # # # # # # # # # # ####
+summary(detection_model)$coef_table %>%
   as_tibble(rownames="Term") %>%
   select(-`z-value`) %>%
   mutate(sig = get_sig(`p-value`),
@@ -101,33 +103,31 @@ summary(presence_model)$coef_table %>%
          `Standard Error` = Std.Err,
          ` ` = sig) %>%
   kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc") %>%
-  add_header_above(c(" "=1, "Presence"=4)) %>%
-  kable_styling(latex_options="scale_down") %>%
+  add_header_above(c(" "=1, "Detection"=4)) %>%
   collapse_rows(1, latex_hline="major") %T>%
-  save_kable(file="../figures/best_presence_model.png")
+  save_kable(file="../figures/best_detection_model.png")
 
 #### SUMMARY TABLE FOR BEST PERSISTENCE MODEL # # # # # # # # # # # # # # # ####
-summary(persistence_model)$coef %>%
+summary(persistence_model)$coef_table %>%
   as_tibble(rownames="Term") %>%
-  select(-`z value`) %>%
-  mutate(sig = get_sig(`Pr(>|z|)`),
+  select(-`z-value`) %>%
+  mutate(sig = get_sig(`p-value`),
          Term = str_remove_all(Term, "\\d$|\\d(?=:)"),
          Term = str_remove_all(Term, "\\(month\\)"),
          Term = str_remove_all(Term, ", df = 1, degree = 1\\)"),
          Term = str_remove_all(Term, "bs\\((?=\\w+($|:))"),
-         Term = str_replace_all(Term, c("total_tested"="Total Number of Tests",
+         Term = str_replace_all(Term, c("total_tested_over_lag"="Total Number of Samples Submitted Over Previous 11 Months",
                                         "temporal_lag"="Temporal Lag",
                                         "spatial_lag"="Spatial Effect",
                                         "latitude"="Latitude",
                                         "density"="Population Density",
                                         "habitat"="Racoon Favorable Habitat",
                                         "month"="Month"))) %>%
-  rename(`\\emph{p} value` = `Pr(>|z|)`,
-         `Standard Error` = `Std. Error`,
+  rename(`\\emph{p} value` = `p-value`,
+         `Standard Error` = `Std.Err`,
          ` ` = sig) %>%
   kable(booktabs=TRUE, digits=4, format="latex", escape=FALSE, align="lrrrc") %>%
   add_header_above(c(" "=1, "Persistence"=4)) %>%
-  kable_styling(latex_options="scale_down") %>%
   collapse_rows(1, latex_hline="major") %T>%
   save_kable(file="../figures/best_persistence_model.png")
 
@@ -174,7 +174,7 @@ predictions %>%
   {ggplot(.) +
       aes(x=month, colour=latitude) +
       geom_smooth(aes(y=pred_zi), size=1, se=FALSE) +
-      scale_y_continuous(name="Presence", limits=0:1) +
+      scale_y_continuous(name="Detection", limits=0:1) +
       scale_x_continuous(name=NULL, breaks=1:12, labels=month.name) +
       scale_colour_manual(name="Latitude:", values=c("#FC7A1E", "#00A676", "#934D77", "#485696")) +
       theme(axis.text.x=element_text(angle=30, hjust=1, vjust=1),
@@ -182,7 +182,7 @@ predictions %>%
             legend.position=c(0.725, 0.12),
             legend.background=element_rect(fill=alpha("#FFFFFF", 0.8)),
             legend.direction="horizontal")}
-ggsave(filename="../figures/presence_by_month_and_latitude.png", width=7, height=4)
+ggsave(filename="../figures/detection_by_month_and_latitude.png", width=7, height=4)
 
 predictions %>%
   filter(near(latitude, 28, tol=0.5) | near(latitude, 33, tol=0.5) | near(latitude, 37, tol=0.5) | near(latitude, 43, tol=0.5)) %>%
@@ -211,7 +211,7 @@ predictions %>%
       aes(x=latitude) +
       geom_smooth(aes(y=pred_zi, colour=density), size=1, se=FALSE) +
       geom_rug(size=0.67, alpha=0.2, data=distinct(rug_data, fips, latitude)) +
-      scale_y_continuous(name="Presence", limits=0:1) +
+      scale_y_continuous(name="Detection", limits=0:1) +
       scale_x_continuous(expand=expansion()) +
       scale_colour_manual(values=c("#485696", "#934D77", "#00A676", "#FC7A1E"),
                           name=expression(paste("Population Density (people / ", km^2, ")"))) +
@@ -219,7 +219,7 @@ predictions %>%
             legend.position=c(0.76, 0.23),
             legend.direction="vertical",
             axis.title.x=element_blank())}
-ggsave(filename="../figures/presence_by_latitude_and_density.png", width=7, height=5)
+ggsave(filename="../figures/detection_by_latitude_and_density.png", width=7, height=5)
 
 predictions %>%
   filter(near(density, sort(unique(density))[c(2,4,6,8)])) %>%
@@ -258,24 +258,23 @@ predictions %>%
         legend.direction="horizontal")
 
 #### HABITAT (NOT SIGNIFICANT)  # # # # # # # # # # # # # # # # # # # # # # ####
-# cutoff_presence <- 0.12; cutoff_positivity <- 0.25; cutoff_persistence <- 0.12;
-cutoff_presence <- 0.16; cutoff_positivity <- 0.17; cutoff_persistence <- 0.16;
-(monthly_data %>% mutate(presence=as.integer((positive / total_tested) > 0)) %>%
+cutoff_detection <- 0.16; cutoff_positivity <- 0.17; cutoff_persistence <- 0.16;
+(monthly_data %>% mutate(detection=as.integer((positive / total_tested) > 0)) %>%
    {ggplot(.) +
-       aes(x=habitat, y=presence) +
+       aes(x=habitat, y=detection) +
        geom_quasirandom(groupOnX=FALSE, size=0.25, varwidth=TRUE, width=0.1, alpha=0.05) +
        # geom_smooth(size=1, colour="#FC7A1E") +
        geom_smooth(size=1, colour="#FC7A1E", formula=y~x,
-                   method="lm", data=filter(., habitat <= cutoff_presence)) +
-       stat_cor(data=filter(., habitat <= cutoff_presence), colour="#FC7A1E", label.x=0.5, label.y=0.4,
+                   method="lm", data=filter(., habitat <= cutoff_detection)) +
+       stat_cor(data=filter(., habitat <= cutoff_detection), colour="#FC7A1E", label.x=0.5, label.y=0.4,
                 aes(label=paste(after_stat(rr.label), after_stat(p.label), sep="~`,`~")),
                 method="spearman") +
        geom_smooth(size=1, colour="#485696", formula=y~x,
-                   method="lm", data=filter(., habitat > cutoff_presence)) +
-       stat_cor(data=filter(., habitat > cutoff_presence), colour="#485696", label.x=0.5, label.y=0.25,
+                   method="lm", data=filter(., habitat > cutoff_detection)) +
+       stat_cor(data=filter(., habitat > cutoff_detection), colour="#485696", label.x=0.5, label.y=0.25,
                 aes(label=paste(after_stat(rr.label), after_stat(p.label), sep="~`,`~")),
                 method="spearman") +
-       scale_y_continuous(name="Presence", breaks=0:1)}) +
+       scale_y_continuous(name="Detection", breaks=0:1)}) +
 
   (monthly_data %>%
      mutate(positivity = positive / total_tested) %>%

@@ -18,14 +18,14 @@ monthly_data <- read_csv("../data/hypothetical_data.csv", col_types="fdddddddd")
          density = scale(density))
 
 # best fitting spline parameters (differ by model type)
-df_density <- 2
-degree_density <- 2
+df_density <- 1
+degree_density <- 1
 
-df_month <- 1
+df_month <- 6
 degree_month <- 1
 
-df_latitude <- 2
-degree_latitude <- 2
+df_latitude <- 5
+degree_latitude <- 1
 
 # construct the base model formula used for the positivity and presence models
 base_formula <- formula(str_glue("~ bs(month, df={df_month}, degree={degree_month}) +
@@ -55,8 +55,8 @@ assign(str_glue("positivity_{model_base}"),
                     # edge cases, avoiding an error when fitting
                     multiply_by(n() - 1) %>% add(0.5) %>% divide_by(n()))
        ))
-save(list=c(str_glue("positivity_{model_base}"), "base_formula"),
-     file=str_glue("../results/positivity_{model_base}.RData"))
+# save(list=c(str_glue("positivity_{model_base}"), "base_formula"),
+#      file=str_glue("../results/positivity_{model_base}.RData"))
 
 #### Rabies Presence Model ####
 assign(str_glue("presence_{model_base}"),
@@ -66,12 +66,12 @@ assign(str_glue("presence_{model_base}"),
          family    = binomial(),
          data      = monthly_data %>% mutate(presence = (positive > 0) %>% as.factor())
        ))
-save(list=c(str_glue("presence_{model_base}"), "base_formula"),
-     file=str_glue("../results/presence_{model_base}.RData"))
+# save(list=c(str_glue("presence_{model_base}"), "base_formula"),
+#      file=str_glue("../results/presence_{model_base}.RData"))
 
 #### Rabies Persistence Model ####
 # This model requires restructured data. First define the lag and cutoff parameters
-num_months_with_pos <- 6
+num_months_with_pos <- 5
 lag_duration_months <- 11
 
 # transform the original data to identify cases of rabies persistence
@@ -108,11 +108,15 @@ if (file.exists(str_glue("../data/persistence_{num_months_with_pos}.{lag_duratio
 }
 
 assign(str_glue("persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}"),
-       glmer(update.formula(base_formula,
-                            persistence ~ . + (1|fips) + log(total_tested_over_lag)),
-             family=binomial,
-             data=persistence_data))
-save(list=c(str_glue("persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}"), "base_formula"),
-     file=str_glue("../results/persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}.RData"))
+       mixed_model(
+         fixed          = base_formula,
+         random         = ~ 1 | fips,
+         family         = binomial(),
+         max_coef_value = 1000,
+         iter_EM        = 0,
+         data           = persistence_data
+       ))
+# save(list=c(str_glue("persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}"), "base_formula"),
+#      file=str_glue("../results/persistence_{num_months_with_pos}.{lag_duration_months}_{model_base}.RData"))
 
 
